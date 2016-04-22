@@ -1,0 +1,154 @@
+---
+title: "Reproducible Research Course Project"
+author: "Dana Schmidt"
+date: "April 19, 2016"
+output: html_document
+keep_md: true
+---
+
+## The Impact of Severe Weather Events on Public Health and the Economy
+
+### Synopsis
+The goal of this report is to analyze the impact of severe weather events on public health and the economy based on data collected from the U.S. National Oceanic and Atmospheric Administration (NOAA) from 1950-2011. The data collected and used for this report include estimates of fatalities, injuries and property damage. We will use this data to determine what types of events are most harmful with respect to population heath and what type of events have the greatest economic impact. 
+
+### Data Processing
+First we need to set the working directory to the directory that contains the data file and load any necessary libraries. 
+
+```{r}
+setwd("C:/Users/deschmidt/Desktop/Reproducible Research/data")
+library(R.utils)
+library(ggplot2)
+library(plyr)
+```
+
+Next we need to unzip the file and read in the CSV file.
+
+```{r}
+filePath <- "repdata-data-StormData.csv.bz2"
+destPath <- "repdata-data-StormData.csv"
+bunzip2(filePath,destPath,overwrite=TRUE, remove=FALSE)
+
+stormData <- read.csv('repdata-data-StormData.csv')
+```
+
+We need to look at a small portion of the data to get an idea of what kind of data we are analyzing. 
+
+```{r}
+dim(stormData)
+head(stormData, n = 2)
+```
+
+There are 902297 observations of 37 variables. The data starts in the year 1950 and continues through November 2011. 
+
+In reviewing the data we determine that the amount of data recorded improves as the years go on. This is most likely due to more reliable means of record storage in the later years. We will remove the less reliable data from our dataset in order to improve the quality of our analysis.
+
+```{r}
+stormData$year <- as.numeric(format(as.Date(stormData$BGN_DATE, format = "%m/%d/%Y %H:%M:%S"), "%Y"))
+
+hist(stormData$year, breaks = 30)
+```
+
+In the above histogram we can see that the frequency of data collection increases significantly around the year 1995. This allows us to subset our data to only use the data collected from the years 1995 to 2011. 
+
+```{r}
+storm <- stormData[stormData$year >= 1995, ]
+dim(storm)
+```
+
+Now our dataset contains 681500 observations of 38 varialbes.
+
+#### Impact on Public Health
+In order to determine the impact of severe weather on public health we need to look at the number of fatalities and injuries casued by each event type (EVTYPE). We will get the top 10 most severe types of weather events for fatalities and injuries. 
+
+```{r}
+sort <- function(fieldName, top = 10, dataset = stormData) {
+  index <- which(colnames(dataset) == fieldName)
+  field <- aggregate(dataset[, index], by = list(dataset$EVTYPE), FUN = "sum")
+  names(field) <- c("EVTYPE", fieldName)
+  field <- arrange(field, field[, 2], decreasing = T)
+  field <- head(field, n = top)
+  field <- within(field, EVTYPE <- factor(x = EVTYPE, levels = field$EVTYPE))
+  return(field)
+}
+
+fatalities <- sort("FATALITIES", dataset = storm)
+injuries <- sort("INJURIES", dataset = storm)
+```
+
+#### Impact on Economy
+In order to determine the economic impact of severe weather events we will use the property damage (PROPDMG) and crop damage (CROPDMG) varialbes to calculate the cost of damage caused by each event type (EVTYPE). First, we need to convert the data into equivalent numerical forms. We will use the PROPDMGEXP and CROPDMGEXP variables as a multiplier based on the meanings found in the code book ([Storm Data Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf)) (Hundred(H), Thousand(K), Million(M) and Billion(B). 
+
+```{r}
+convertHelper <- function(dataset = storm, fieldName, newFieldName) {
+  totalLen <- dim(dataset)[2]
+  index <- which(colnames(dataset) == fieldName)
+  dataset[, index] <- as.character(dataset[, index])
+  logic <- !is.na(toupper(dataset[, index]))
+  dataset[logic & toupper(dataset[, index]) == "B", index] <- "9"
+  dataset[logic & toupper(dataset[, index]) == "M", index] <- "6"
+  dataset[logic & toupper(dataset[, index]) == "K", index] <- "3"
+  dataset[logic & toupper(dataset[, index]) == "H", index] <- "2"
+  dataset[logic & toupper(dataset[, index]) == "", index] <- "0"
+  dataset[, index] <- as.numeric(dataset[, index])
+  dataset[is.na(dataset[, index]), index] <- 0
+  dataset <- cbind(dataset, dataset[, index - 1] * 10^dataset[, index])
+  names(dataset)[totalLen + 1] <- newFieldName
+  return(dataset)
+}
+
+storm <- convertHelper(storm, "PROPDMGEXP", "propertyDamage")
+storm <- convertHelper(storm, "CROPDMGEXP", "cropDamage")
+names(storm)
+options(scipen=999)
+property <- sort("propertyDamage", dataset = storm)
+crop <- sort("cropDamage", dataset = storm)
+```
+
+### Results
+For the impact on Public Health we have sorted the top 10 event types based on number of fatalities and number of injuries. 
+
+```{r}
+fatalities
+injuries
+```
+
+We also created a pair of charts representing the same information. 
+
+```{r}
+fatalitiesPlot <- ggplot(fatalities, aes(EVTYPE, weight = FATALITIES)) + 
+  geom_bar(width = .5) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Total Fatalities by Severe Weather\n Event Type in the U.S.\n from 1995 - 2011", x = NULL, y = "Total Fatalities")
+
+injuriesPlot <- ggplot(injuries, aes(EVTYPE, weight = INJURIES)) + 
+  geom_bar(width = .5) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Total Injuries by Severe Weather\n Event Type in the U.S.\n from 1995 - 2011", x = NULL, y = "Total Injuries")
+grid.arrange(fatalitiesPlot, injuriesPlot, ncol = 2)
+```
+
+Based on the above information we find that Excessive Heat and Tornado events are most harmful with respect to public health.  
+
+For the economic impact we have sorted the top 10 event types based on the cost of damage to property and crops. 
+
+```{r}
+property
+crop
+```
+
+The charts below provide a more visual representation of the results. 
+
+```{r}
+propertyPlot <- ggplot(property, aes(EVTYPE, weight = propertyDamage)) + 
+  geom_bar(width = .5) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Total Property Damage by\n Severe Weather Event Type\n in the U.S. from 1995 - 2011", x = NULL, y = "Total Property Damage (thousands of USD)")
+
+cropPlot <- ggplot(crop, aes(EVTYPE, weight = cropDamage)) + 
+  geom_bar(width = .5) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Total Crop Damage by\n Severe Weather Event Type\n in the U.S. from 1995 - 2011", x = NULL, y = "Total Crop Damage (thousands of USD)")
+grid.arrange(propertyPlot, cropPlot, ncol = 2)
+```
+
+Based on the above information we can determine that while Flood and Hurricane/Typhoon cause the most property damage Drought and Flood cause the most crop damage. In looking at property and crop damage as a whole we can conclude that Flood and Drought have the biggest economic impact. 
